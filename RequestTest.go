@@ -1,19 +1,16 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"os"
 	"sync"
 	"time"
+
 	"github.com/valyala/fasthttp"
 )
 
-const (
-	concurrency = 28
-	totalReqs   = 1000000
-	url         = "https://s60822.cdn.ngenix.net/"
-)
-
-func makeRequest(client *fasthttp.Client, wg *sync.WaitGroup, id int) {
+func makeRequest(client *fasthttp.Client, wg *sync.WaitGroup, id int, url string) {
 	defer wg.Done()
 
 	req := fasthttp.AcquireRequest()
@@ -34,28 +31,43 @@ func makeRequest(client *fasthttp.Client, wg *sync.WaitGroup, id int) {
 }
 
 func main() {
+	// Определяем флаги командной строки
+	concurrency := flag.Int("concurrency", 0, "Количество параллельных запросов")
+	totalReqs := flag.Int("totalReqs", 0, "Общее количество запросов")
+	url := flag.String("url", "", "URL для отправки запросов")
+
+	// Парсим флаги
+	flag.Parse()
+
+	// Проверяем, что параметры заданы
+	if *concurrency == 0 || *totalReqs == 0 || *url == "" {
+		fmt.Println("Ошибка: необходимо задать все параметры: -concurrency, -totalReqs, -url")
+		os.Exit(1)
+	}
+
 	client := &fasthttp.Client{
 		MaxConnsPerHost: 10000, // Увеличиваем лимит соединений
 	}
 
-	wg := &sync.WaitGroup{}
-	semaphore := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, *concurrency)
 
 	start := time.Now()
 
-	for i := 0; i < totalReqs; i++ {
+	for i := 0; i < *totalReqs; i++ {
 		wg.Add(1)
 		semaphore <- struct{}{}
 
 		go func(id int) {
 			defer func() { <-semaphore }()
-			makeRequest(client, wg, id)
+			makeRequest(client, &wg, id, *url)
 		}(i)
 	}
 
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	fmt.Printf("All requests completed in %v\n", elapsed)
-	fmt.Printf("Achieved RPS: %.2f\n", float64(totalReqs)/elapsed.Seconds())
+	fmt.Printf("Все запросы завершены за %v\n", elapsed)
+	fmt.Printf("Достигнуто RPS: %.2f\n", float64(*totalReqs)/elapsed.Seconds())
 }
+
